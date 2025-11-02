@@ -40,12 +40,17 @@ jobs:
         run: |
           docker push us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
 
-      # ✅ Install the GKE authentication plugin
+      # ✅ Install the GKE authentication plugin properly
       - name: Install GKE gcloud auth plugin
         run: |
-          sudo apt-get update
-          sudo apt-get install google-cloud-sdk-gke-gcloud-auth-plugin -y
-          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          echo "Installing GKE gcloud auth plugin..."
+          sudo apt-get update -y
+          sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
+          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
+          curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+          sudo apt-get update -y
+          sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
+          echo "export USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
       - name: Connect to GKE cluster
         run: |
