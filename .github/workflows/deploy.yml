@@ -61,29 +61,22 @@ jobs:
           sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      # ✅ Step 8: Connect to GKE cluster
-      - name: Connect to GKE cluster
-        run: |
-          gcloud container clusters get-credentials gke-iris-cluster \
-            --region us-central1 \
-            --project swift-yew-472812-c6
-
-      # ✅ Step 9: Deploy updated Docker image to GKE with retry
-      - name: Deploy to GKE (with retry)
+      # ✅ Step 8: Deploy to GKE
+      - name: Deploy to GKE (create or update)
         run: |
           set -e
-          echo "Updating deployment with latest image..."
-          kubectl set image deployment/iris-api-deployment iris-api=us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
+          echo "Checking if deployment exists..."
+          if kubectl get deployment iris-api-deployment >/dev/null 2>&1; then
+            echo "Deployment exists — updating image..."
+            kubectl set image deployment/iris-api-deployment iris-api=us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
+          else
+            echo "Deployment not found — creating a new one..."
+            kubectl create deployment iris-api-deployment \
+              --image=us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
+            kubectl expose deployment iris-api-deployment \
+              --type=LoadBalancer --port=80 --target-port=5000
+          fi
           
           echo "Waiting for rollout..."
-          for i in {1..3}; do
-            if kubectl rollout status deployment/iris-api-deployment --timeout=60s; then
-              echo "✅ Deployment succeeded!"
-              exit 0
-            else
-              echo "⚠️ Rollout attempt $i failed, retrying in 10s..."
-              sleep 10
-            fi
-          done
-          echo "❌ Deployment failed after 3 attempts."
-          exit 1
+          kubectl rollout status deployment/iris-api-deployment --timeout=120s
+
