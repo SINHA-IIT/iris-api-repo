@@ -6,7 +6,7 @@ on:
       - main
 
 permissions:
-  id-token: write
+  id-token: write    # Required for OIDC authentication
   contents: read
 
 jobs:
@@ -14,9 +14,11 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ✅ Step 1: Checkout the code
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ✅ Step 2: Authenticate to Google Cloud using Workload Identity Federation (no key.json)
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
         with:
@@ -24,39 +26,64 @@ jobs:
           workload_identity_provider: "projects/940190263143/locations/global/workloadIdentityPools/github-pool/providers/github-provider"
           service_account: "github-actions@swift-yew-472812-c6.iam.gserviceaccount.com"
 
+      # ✅ Step 3: Setup gcloud CLI
       - name: Setup gcloud CLI
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: swift-yew-472812-c6
 
+      # ✅ Step 4: Configure Docker for Google Artifact Registry
       - name: Configure Docker for Artifact Registry
         run: gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
 
+      # ✅ Step 5: Build Docker image
       - name: Build Docker image
         run: |
           docker build -t us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest .
 
+      # ✅ Step 6: Push Docker image to Artifact Registry
       - name: Push Docker image to Artifact Registry
         run: |
           docker push us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
 
-      # ✅ Install the GKE authentication plugin properly
+      # ✅ Step 7: Install the GKE authentication plugin (Ubuntu 24.04 safe)
       - name: Install GKE gcloud auth plugin
         run: |
-          echo "Installing GKE gcloud auth plugin..."
+          echo "Installing GKE gcloud auth plugin (Ubuntu 24.04 safe)..."
           sudo apt-get update -y
           sudo apt-get install -y apt-transport-https ca-certificates gnupg curl
-          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee -a /etc/apt/sources.list.d/google-cloud-sdk.list
-          curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+          sudo mkdir -p /usr/share/keyrings
+          curl -fsSL https://packages.cloud.google.com/apt/doc/apt-key.gpg | \
+            gpg --dearmor | sudo tee /usr/share/keyrings/cloud.google.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | \
+            sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
           sudo apt-get update -y
           sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
-          echo "export USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
+          echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
+      # ✅ Step 8: Connect to GKE cluster
       - name: Connect to GKE cluster
         run: |
-          gcloud container clusters get-credentials gke-iris-cluster --region us-central1 --project swift-yew-472812-c6
+          gcloud container clusters get-credentials gke-iris-cluster \
+            --region us-central1 \
+            --project swift-yew-472812-c6
 
-      - name: Deploy to GKE
+      # ✅ Step 9: Deploy updated Docker image to GKE with retry
+      - name: Deploy to GKE (with retry)
         run: |
+          set -e
+          echo "Updating deployment with latest image..."
           kubectl set image deployment/iris-api-deployment iris-api=us-central1-docker.pkg.dev/swift-yew-472812-c6/my-repo/iris-api:latest
-          kubectl rollout status deployment/iris-api-deployment
+          
+          echo "Waiting for rollout..."
+          for i in {1..3}; do
+            if kubectl rollout status deployment/iris-api-deployment --timeout=60s; then
+              echo "✅ Deployment succeeded!"
+              exit 0
+            else
+              echo "⚠️ Rollout attempt $i failed, retrying in 10s..."
+              sleep 10
+            fi
+          done
+          echo "❌ Deployment failed after 3 attempts."
+          exit 1
