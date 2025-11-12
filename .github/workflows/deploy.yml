@@ -61,10 +61,24 @@ jobs:
           sudo apt-get install -y google-cloud-sdk-gke-gcloud-auth-plugin
           echo "USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
 
-      # ✅ Step 8: Deploy to GKE
+            # ✅ Step 8: Connect to GKE cluster (with verification)
+      - name: Connect to GKE cluster
+        run: |
+          echo "Authenticating to GKE cluster..."
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          gcloud container clusters get-credentials gke-iris-cluster \
+            --region us-central1 \
+            --project swift-yew-472812-c6
+          
+          echo "Verifying connection..."
+          kubectl cluster-info
+          kubectl get nodes
+
+      # ✅ Step 9: Deploy to GKE (create or update)
       - name: Deploy to GKE (create or update)
         run: |
           set -e
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
           echo "Checking if deployment exists..."
           if kubectl get deployment iris-api-deployment >/dev/null 2>&1; then
             echo "Deployment exists — updating image..."
@@ -76,7 +90,8 @@ jobs:
             kubectl expose deployment iris-api-deployment \
               --type=LoadBalancer --port=80 --target-port=5000
           fi
-          
+
           echo "Waiting for rollout..."
-          kubectl rollout status deployment/iris-api-deployment --timeout=120s
+          kubectl rollout status deployment/iris-api-deployment --timeout=180s
+
 
